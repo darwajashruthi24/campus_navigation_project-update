@@ -277,7 +277,7 @@ def build_ui():
         out_img = gr.Image(label="Annotated image")
         out_json = gr.JSON(label="Detections / Classifications")
         out_nav = gr.Markdown(label="Navigation")
-            out_graph_status = gr.Markdown(label="Graph status")
+        out_graph_status = gr.Markdown(label="Graph status")
 
         def infer(image, run_yolo, run_resnet, conf_thresh, device_choice):
             if image is None:

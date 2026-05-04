@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+build/
+dist/
+.git/
+*.pth
