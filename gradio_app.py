@@ -2,6 +2,8 @@ import os
 import sys
 import time
 from typing import List, Dict, Any
+import io
+import matplotlib.pyplot as plt
 
 try:
     import torch
@@ -91,10 +93,60 @@ def update_graph_from_text(text: str):
             newG.add_node(b)
             newG.add_edge(a, b, weight=w)
     if newG.number_of_nodes() == 0:
-        return get_graph_text(), "Graph not changed: no valid edges found.", gr.Dropdown.update(choices=list(G.nodes()), value=None)
+        return get_graph_text(), "Graph not changed: no valid edges found.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
     G = newG
     status = f"Saved graph — {G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None))
+    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
+
+
+def render_graph_image(size=(600, 360)):
+    """Return a PIL image rendering of the current navigation graph."""
+    fig = plt.figure(figsize=(size[0] / 100, size[1] / 100))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw(G, pos, with_labels=True, node_color="#89CFF0", node_size=900, font_size=8, edge_color="#555555")
+    labels = nx.get_edge_attributes(G, "weight")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_size=7)
+    plt.axis("off")
+    buf = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    buf.seek(0)
+    return Image.open(buf)
+
+
+def add_edge_ui(a: str, b: str, w: float):
+    global G
+    if not a or not b:
+        return get_graph_text(), "Provide both nodes to add an edge.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
+    try:
+        weight = float(w)
+    except Exception:
+        weight = 60.0
+    G.add_node(a)
+    G.add_node(b)
+    G.add_edge(a, b, weight=weight)
+    status = f"Added edge {a} - {b} ({weight})"
+    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=a), render_graph_image()
+
+
+def remove_edge_ui(a: str, b: str):
+    global G
+    if not a or not b:
+        return get_graph_text(), "Provide both nodes to remove an edge.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
+    if G.has_edge(a, b):
+        G.remove_edge(a, b)
+        status = f"Removed edge {a} - {b}"
+    else:
+        status = f"Edge {a} - {b} not found"
+    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
+
+
+def reset_graph_ui():
+    global G
+    G = build_default_graph(_RESNET_CLASSES)
+    status = f"Reset graph to default ({len(_RESNET_CLASSES)} nodes)"
+    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
 
 
 def load_yolo(model_path: str = None):
@@ -286,9 +338,7 @@ def build_ui():
                 run_btn = gr.Button("Run Detection / Classification")
                 dest_dd = gr.Dropdown(choices=_RESNET_CLASSES, value=(_RESNET_CLASSES[-1] if _RESNET_CLASSES else None), label="Destination (for navigation)")
                 nav_btn = gr.Button("Navigate")
-                # Graph editor
-                graph_txt = gr.Textbox(value=get_graph_text(), lines=8, label="Navigation graph (one edge per line: node1,node2,weight)")
-                save_graph = gr.Button("Save Graph")
+                # Graph editor will appear on the right column
         with gr.Column(scale=2):
             out_img = gr.Image(label="Annotated image")
             pred_md = gr.Markdown("", label="Prediction")
@@ -296,6 +346,18 @@ def build_ui():
         with gr.Column(scale=1):
             out_json = gr.JSON(label="Detections / Classifications")
             out_graph_status = gr.Markdown(label="Graph status")
+            gr.Markdown("**Navigation Graph Editor**")
+            graph_preview = gr.Image(value=render_graph_image(), label="Graph preview")
+            graph_txt = gr.Textbox(value=get_graph_text(), lines=6, label="Navigation graph (one edge per line: node1,node2,weight)")
+            save_graph = gr.Button("Save Graph")
+            with gr.Row():
+                add_a = gr.Textbox(label="Node A", placeholder="node_a")
+                add_b = gr.Textbox(label="Node B", placeholder="node_b")
+            add_w = gr.Number(value=60, label="Weight (seconds)")
+            with gr.Row():
+                add_btn = gr.Button("Add Edge +")
+                remove_btn = gr.Button("Remove Edge -")
+                reset_btn = gr.Button("Reset Graph")
 
         def infer(image, run_yolo, run_resnet, conf_thresh, class_conf_thresh, device_choice):
             if image is None:
@@ -335,7 +397,10 @@ def build_ui():
         nav_btn.click(navigate_ui, inputs=[inp, dest_dd, conf, class_conf, device], outputs=[out_img, out_nav, out_json, pred_md])
         # auto-run infer when image is uploaded
         inp.upload(infer, inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device], outputs=[out_img, out_json, out_nav, pred_md])
-        save_graph.click(update_graph_from_text, inputs=[graph_txt], outputs=[graph_txt, out_graph_status, dest_dd])
+        save_graph.click(update_graph_from_text, inputs=[graph_txt], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        add_btn.click(add_edge_ui, inputs=[add_a, add_b, add_w], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        remove_btn.click(remove_edge_ui, inputs=[add_a, add_b], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        reset_btn.click(reset_graph_ui, inputs=None, outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
     return demo
 
 
