@@ -201,35 +201,49 @@ def run_inference(pil_img: Image.Image, use_yolo=True, use_resnet=True, conf_thr
     return annotated, detections
 
 
-def navigate_from_image(pil_img: Image.Image, destination: str, conf_thresh: float = 0.25, device: str = "cpu") -> (Image.Image, str, List[Dict[str, Any]]):
+def classify_full_image(pil_img: Image.Image, device: str = "cpu") -> (str, float):
+    """Return predicted class and confidence for the full image using ResNet."""
+    resnet = load_resnet(device=device)
+    if pil_img is None or resnet is None:
+        return None, 0.0
+    img = pil_img.convert("RGB")
+    try:
+        inp = preprocess_resnet(img, device=device)
+        with torch.no_grad():
+            out = resnet(inp)
+            probs = torch.nn.functional.softmax(out, dim=1)[0].cpu()
+            idx = int(probs.argmax())
+            location = _RESNET_CLASSES[idx] if idx < len(_RESNET_CLASSES) else str(idx)
+            confidence = float(probs.max())
+            return location, confidence
+    except Exception:
+        return None, 0.0
+
+
+def navigate_from_image(pil_img: Image.Image, destination: str, conf_thresh: float = 0.25, class_thresh: float = 0.8, device: str = "cpu") -> (Image.Image, str, List[Dict[str, Any]]):
     """Runs full navigation: resnet classification (location), yolo detection, then compute shortest path to destination.
     Returns (annotated_image, navigation_markdown, detections_list)."""
     if pil_img is None:
         return None, "No image provided", []
 
     # run resnet-only classification on full image
-    resnet = load_resnet(device=device)
     img = pil_img.convert("RGB")
-    location = None
-    confidence = 0.0
-    if resnet is not None:
-        try:
-            inp = preprocess_resnet(img, device=device)
-            with torch.no_grad():
-                out = resnet(inp)
-                probs = torch.nn.functional.softmax(out, dim=1)[0].cpu()
-                idx = int(probs.argmax())
-                location = _RESNET_CLASSES[idx] if idx < len(_RESNET_CLASSES) else str(idx)
-                confidence = float(probs.max())
-        except Exception:
-            location = "unknown"
+    location, confidence = classify_full_image(pil_img, device=device)
 
     # run YOLO for signs and get annotated image
     annotated, detections = run_inference(pil_img, use_yolo=True, use_resnet=False, conf_thresh=conf_thresh, device=device)
 
     # build navigation instructions
     nav_md_lines = []
-    nav_md_lines.append(f"**Predicted location:** {location}  — {confidence:.0%}")
+    if location is None:
+        nav_md_lines.append("**Predicted location:** Unknown (classification failed)")
+    else:
+        nav_md_lines.append(f"**Predicted location:** {location}  — {confidence:.0%}")
+    nav_md_lines.append("")
+
+    if confidence < class_thresh:
+        nav_md_lines.append(f"Classification confidence below threshold ({class_thresh:.0%}). Navigation not attempted.")
+        return annotated, "\n".join(nav_md_lines), detections
     nav_md_lines.append("")
 
     if location not in G:
@@ -267,6 +281,7 @@ def build_ui():
                 yolo_cb = gr.Checkbox(label="Run YOLO detection", value=True)
                 resnet_cb = gr.Checkbox(label="Run ResNet classification", value=True)
                 conf = gr.Slider(0.0, 1.0, value=0.25, label="YOLO confidence threshold")
+                class_conf = gr.Slider(0.0, 1.0, value=0.8, label="Classification min confidence")
                 device = gr.Dropdown(choices=["cpu", "cuda"], value="cpu", label="Device")
                 run_btn = gr.Button("Run Detection / Classification")
                 dest_dd = gr.Dropdown(choices=_RESNET_CLASSES, value=(_RESNET_CLASSES[-1] if _RESNET_CLASSES else None), label="Destination (for navigation)")
@@ -274,28 +289,52 @@ def build_ui():
                 # Graph editor
                 graph_txt = gr.Textbox(value=get_graph_text(), lines=8, label="Navigation graph (one edge per line: node1,node2,weight)")
                 save_graph = gr.Button("Save Graph")
-        out_img = gr.Image(label="Annotated image")
-        out_json = gr.JSON(label="Detections / Classifications")
-        out_nav = gr.Markdown(label="Navigation")
-        out_graph_status = gr.Markdown(label="Graph status")
+        with gr.Column(scale=2):
+            out_img = gr.Image(label="Annotated image")
+            pred_md = gr.Markdown("", label="Prediction")
+            out_nav = gr.Markdown(label="Navigation")
+        with gr.Column(scale=1):
+            out_json = gr.JSON(label="Detections / Classifications")
+            out_graph_status = gr.Markdown(label="Graph status")
 
-        def infer(image, run_yolo, run_resnet, conf_thresh, device_choice):
+        def infer(image, run_yolo, run_resnet, conf_thresh, class_conf_thresh, device_choice):
             if image is None:
-                return None, {}
+                return None, {}, "No image provided", ""
             annotated, dets = run_inference(image, use_yolo=run_yolo, use_resnet=run_resnet, conf_thresh=conf_thresh, device=device_choice)
-            return annotated, dets
+            # full-image classification
+            loc, confv = classify_full_image(image, device=device_choice)
+            if loc is None:
+                nav_text = "Classification failed"
+                pred_text = "**Prediction:** Unknown"
+            else:
+                b, f, r = parse_location(loc)
+                pretty = b + (f" · {f}" if f else "") + (f" · {r}" if r else "")
+                pred_text = f"### {pretty}  \n**Class:** {loc} — {confv:.0%}"
+                if confv >= class_conf_thresh:
+                    nav_text = f"**Predicted location:** {loc} ({pretty}) — {confv:.0%}"
+                else:
+                    nav_text = f"Predicted location: {loc} — confidence {confv:.0%} (below threshold {class_conf_thresh:.0%})"
+            return annotated, dets, nav_text, pred_text
 
-        def navigate_ui(image, destination, conf_thresh, device_choice):
+        def navigate_ui(image, destination, conf_thresh, class_conf_thresh, device_choice):
             if image is None:
-                return None, "No image provided", {}
-            annotated, nav_text, dets = navigate_from_image(image, destination, conf_thresh=conf_thresh, device=device_choice)
-            return annotated, nav_text, dets
+                return None, "No image provided", {}, ""
+            annotated, nav_text, dets = navigate_from_image(image, destination, conf_thresh=conf_thresh, class_thresh=class_conf_thresh, device=device_choice)
+            # also compute a prediction display
+            loc, confv = classify_full_image(image, device=device_choice)
+            if loc:
+                b, f, r = parse_location(loc)
+                pretty = b + (f" · {f}" if f else "") + (f" · {r}" if r else "")
+                pred_text = f"### {pretty}  \n**Class:** {loc} — {confv:.0%}"
+            else:
+                pred_text = ""
+            return annotated, nav_text, dets, pred_text
 
-        run_btn.click(infer, inputs=[inp, yolo_cb, resnet_cb, conf, device], outputs=[out_img, out_json])
+        run_btn.click(infer, inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device], outputs=[out_img, out_json, out_nav, pred_md])
         # allow running navigation separately
-        nav_btn.click(navigate_ui, inputs=[inp, dest_dd, conf, device], outputs=[out_img, out_nav, out_json])
+        nav_btn.click(navigate_ui, inputs=[inp, dest_dd, conf, class_conf, device], outputs=[out_img, out_nav, out_json, pred_md])
         # auto-run infer when image is uploaded
-        inp.upload(infer, inputs=[inp, yolo_cb, resnet_cb, conf, device], outputs=[out_img, out_json])
+        inp.upload(infer, inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device], outputs=[out_img, out_json, out_nav, pred_md])
         save_graph.click(update_graph_from_text, inputs=[graph_txt], outputs=[graph_txt, out_graph_status, dest_dd])
     return demo
 
