@@ -93,10 +93,10 @@ def update_graph_from_text(text: str):
             newG.add_node(b)
             newG.add_edge(a, b, weight=w)
     if newG.number_of_nodes() == 0:
-        return get_graph_text(), "Graph not changed: no valid edges found.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
+        return get_graph_text(), "Graph not changed: no valid edges found.", gr.update(choices=list(G.nodes()), value=None), render_graph_image()
     G = newG
     status = f"Saved graph — {G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
+    return get_graph_text(), status, gr.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
 
 
 def render_graph_image(size=(600, 360)):
@@ -118,7 +118,7 @@ def render_graph_image(size=(600, 360)):
 def add_edge_ui(a: str, b: str, w: float):
     global G
     if not a or not b:
-        return get_graph_text(), "Provide both nodes to add an edge.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
+        return get_graph_text(), "Provide both nodes to add an edge.", gr.update(choices=list(G.nodes()), value=None), render_graph_image()
     try:
         weight = float(w)
     except Exception:
@@ -127,26 +127,26 @@ def add_edge_ui(a: str, b: str, w: float):
     G.add_node(b)
     G.add_edge(a, b, weight=weight)
     status = f"Added edge {a} - {b} ({weight})"
-    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=a), render_graph_image()
+    return get_graph_text(), status, gr.update(choices=list(G.nodes()), value=a), render_graph_image()
 
 
 def remove_edge_ui(a: str, b: str):
     global G
     if not a or not b:
-        return get_graph_text(), "Provide both nodes to remove an edge.", gr.Dropdown.update(choices=list(G.nodes()), value=None), render_graph_image()
+        return get_graph_text(), "Provide both nodes to remove an edge.", gr.update(choices=list(G.nodes()), value=None), render_graph_image()
     if G.has_edge(a, b):
         G.remove_edge(a, b)
         status = f"Removed edge {a} - {b}"
     else:
         status = f"Edge {a} - {b} not found"
-    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
+    return get_graph_text(), status, gr.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
 
 
 def reset_graph_ui():
     global G
     G = build_default_graph(_RESNET_CLASSES)
     status = f"Reset graph to default ({len(_RESNET_CLASSES)} nodes)"
-    return get_graph_text(), status, gr.Dropdown.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
+    return get_graph_text(), status, gr.update(choices=list(G.nodes()), value=(list(G.nodes())[0] if G.nodes() else None)), render_graph_image()
 
 
 def load_yolo(model_path: str = None):
@@ -325,85 +325,263 @@ def navigate_from_image(pil_img: Image.Image, destination: str, conf_thresh: flo
 
 
 def build_ui():
-    with gr.Blocks() as demo:
-        gr.Markdown("## Campus Navigation — Detection & Classification Demo")
-        with gr.Row():
-            inp = gr.Image(type="pil", label="Upload Image")
-            with gr.Column():
-                yolo_cb = gr.Checkbox(label="Run YOLO detection", value=True)
-                resnet_cb = gr.Checkbox(label="Run ResNet classification", value=True)
-                conf = gr.Slider(0.0, 1.0, value=0.25, label="YOLO confidence threshold")
-                class_conf = gr.Slider(0.0, 1.0, value=0.8, label="Classification min confidence")
-                device = gr.Dropdown(choices=["cpu", "cuda"], value="cpu", label="Device")
-                run_btn = gr.Button("Run Detection / Classification")
-                dest_dd = gr.Dropdown(choices=_RESNET_CLASSES, value=(_RESNET_CLASSES[-1] if _RESNET_CLASSES else None), label="Destination (for navigation)")
-                nav_btn = gr.Button("Navigate")
-                # Graph editor will appear on the right column
-        with gr.Column(scale=2):
-            out_img = gr.Image(label="Annotated image")
-            pred_md = gr.Markdown("", label="Prediction")
-            out_nav = gr.Markdown(label="Navigation")
-        with gr.Column(scale=1):
-            out_json = gr.JSON(label="Detections / Classifications")
-            out_graph_status = gr.Markdown(label="Graph status")
-            gr.Markdown("**Navigation Graph Editor**")
-            graph_preview = gr.Image(value=render_graph_image(), label="Graph preview")
-            graph_txt = gr.Textbox(value=get_graph_text(), lines=6, label="Navigation graph (one edge per line: node1,node2,weight)")
-            save_graph = gr.Button("Save Graph")
-            with gr.Row():
-                add_a = gr.Textbox(label="Node A", placeholder="node_a")
-                add_b = gr.Textbox(label="Node B", placeholder="node_b")
-            add_w = gr.Number(value=60, label="Weight (seconds)")
-            with gr.Row():
-                add_btn = gr.Button("Add Edge +")
-                remove_btn = gr.Button("Remove Edge -")
-                reset_btn = gr.Button("Reset Graph")
+    # --- Light theme + custom CSS ---------------------------------------
+    light_theme = gr.themes.Soft(
+        primary_hue="blue",
+        secondary_hue="sky",
+        neutral_hue="slate",
+        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+    ).set(
+        body_background_fill="#F7F9FC",
+        body_background_fill_dark="#F7F9FC",
+        background_fill_primary="#FFFFFF",
+        background_fill_secondary="#F1F5F9",
+        block_background_fill="#FFFFFF",
+        block_border_color="#E2E8F0",
+        block_border_width="1px",
+        block_label_background_fill="#F8FAFC",
+        block_label_text_color="#334155",
+        block_title_text_color="#0F172A",
+        block_title_text_weight="600",
+        button_primary_background_fill="#3B82F6",
+        button_primary_background_fill_hover="#2563EB",
+        button_primary_text_color="#FFFFFF",
+        button_secondary_background_fill="#E2E8F0",
+        button_secondary_background_fill_hover="#CBD5E1",
+        button_secondary_text_color="#1E293B",
+        input_background_fill="#FFFFFF",
+        input_border_color="#CBD5E1",
+        slider_color="#3B82F6",
+    )
 
-        def infer(image, run_yolo, run_resnet, conf_thresh, class_conf_thresh, device_choice):
+    custom_css = """
+    /* Page-wide tweaks */
+    .gradio-container {
+        max-width: 1280px !important;
+        margin: 0 auto !important;
+    }
+    /* Bound the uploaded image so a 4032x3024 phone photo doesn't dominate */
+    #input-image, #input-image .image-container,
+    #output-image, #output-image .image-container {
+        max-height: 360px !important;
+    }
+    #input-image img, #output-image img {
+        max-height: 360px !important;
+        object-fit: contain !important;
+    }
+    #graph-preview, #graph-preview .image-container {
+        max-height: 240px !important;
+    }
+    #graph-preview img {
+        max-height: 240px !important;
+        object-fit: contain !important;
+    }
+    /* Make every button in a row stretch to equal width */
+    .equal-row > .gr-button { flex: 1 1 0 !important; min-width: 0 !important; }
+    /* Header */
+    .app-header {
+        padding: 18px 22px;
+        background: linear-gradient(135deg, #EFF6FF 0%, #F0F9FF 100%);
+        border: 1px solid #DBEAFE;
+        border-radius: 12px;
+        margin-bottom: 12px;
+    }
+    .app-header h1 {
+        margin: 0; color: #0F172A; font-size: 22px; font-weight: 700;
+    }
+    .app-header p {
+        margin: 4px 0 0; color: #475569; font-size: 13.5px;
+    }
+    /* Section card titles */
+    .section-title {
+        font-size: 13px; font-weight: 600; color: #475569;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        margin: 4px 0 6px;
+    }
+    /* Result panel emphasis */
+    #pred-md {
+        background: #F8FAFC; border-radius: 10px; padding: 10px 14px;
+        border-left: 4px solid #3B82F6;
+    }
+    #nav-md {
+        background: #F0FDF4; border-radius: 10px; padding: 10px 14px;
+        border-left: 4px solid #22C55E;
+    }
+    """
+
+    # Gradio 6 moved `theme` and `css` from Blocks(...) to launch(...).
+    # Detect once and route accordingly so this file works on Gradio 4-6.
+    _gr_major = int(getattr(gr, "__version__", "4.0.0").split(".")[0])
+    _blocks_kwargs = {"title": "Campus Navigation Demo"}
+    if _gr_major < 6:
+        _blocks_kwargs["theme"] = light_theme
+        _blocks_kwargs["css"] = custom_css
+
+    with gr.Blocks(**_blocks_kwargs) as demo:
+
+        # Header
+        gr.HTML("""
+            <div class="app-header">
+                <h1>Campus Navigation — Detection &amp; Classification</h1>
+                <p>Upload a photo of a campus building. ResNet50 predicts the location, YOLOv8 detects signage, and the navigator returns a walking route to your destination.</p>
+            </div>
+        """)
+
+        # ============== TOP ROW: Input  |  Controls ====================
+        with gr.Row(equal_height=False):
+
+            # ---- LEFT: Image input + run buttons --------------------
+            with gr.Column(scale=5, min_width=420):
+                gr.HTML('<div class="section-title">Input image</div>')
+                inp = gr.Image(
+                    type="pil",
+                    label="Upload a campus photo",
+                    elem_id="input-image",
+                    height=360,
+                )
+                with gr.Row(elem_classes="equal-row"):
+                    run_btn = gr.Button("Run Detection / Classification",
+                                        variant="primary")
+                    nav_btn = gr.Button("Navigate", variant="primary")
+
+            # ---- RIGHT: Settings panel ------------------------------
+            with gr.Column(scale=4, min_width=320):
+                gr.HTML('<div class="section-title">Settings</div>')
+                with gr.Group():
+                    with gr.Row():
+                        yolo_cb   = gr.Checkbox(label="Run YOLO detection",
+                                                value=True)
+                        resnet_cb = gr.Checkbox(label="Run ResNet classification",
+                                                value=True)
+                    conf       = gr.Slider(0.0, 1.0, value=0.25, step=0.01,
+                                           label="YOLO confidence threshold")
+                    class_conf = gr.Slider(0.0, 1.0, value=0.80, step=0.01,
+                                           label="Classification min confidence")
+                    with gr.Row():
+                        device  = gr.Dropdown(choices=["cpu", "cuda"],
+                                              value="cpu", label="Device",
+                                              scale=1)
+                        dest_dd = gr.Dropdown(
+                            choices=_RESNET_CLASSES,
+                            value=(_RESNET_CLASSES[-1]
+                                   if _RESNET_CLASSES else None),
+                            label="Destination",
+                            scale=2)
+
+        # ============== RESULTS ROW ===================================
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=5, min_width=420):
+                gr.HTML('<div class="section-title">Annotated output</div>')
+                out_img = gr.Image(label="Annotated image",
+                                   elem_id="output-image", height=360)
+                pred_md = gr.Markdown("Awaiting input.", elem_id="pred-md")
+
+            with gr.Column(scale=4, min_width=320):
+                gr.HTML('<div class="section-title">Navigation</div>')
+                out_nav = gr.Markdown("No navigation requested yet.",
+                                      elem_id="nav-md")
+                with gr.Accordion("Detection details (JSON)", open=False):
+                    out_json = gr.JSON(label="Detections")
+
+        # ============== GRAPH EDITOR ==================================
+        with gr.Accordion("Navigation Graph Editor", open=False):
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=4, min_width=380):
+                    gr.HTML('<div class="section-title">Graph preview</div>')
+                    graph_preview = gr.Image(value=render_graph_image(),
+                                             label="Current graph",
+                                             elem_id="graph-preview",
+                                             height=240)
+                    out_graph_status = gr.Markdown("")
+
+                with gr.Column(scale=5, min_width=420):
+                    gr.HTML('<div class="section-title">Edges (one per line: nodeA,nodeB,weight)</div>')
+                    graph_txt = gr.Textbox(value=get_graph_text(), lines=6,
+                                           label="Graph definition",
+                                           show_label=False)
+                    save_graph = gr.Button("Save Graph", variant="primary")
+
+                    gr.HTML('<div class="section-title" style="margin-top:14px;">Add or remove an edge</div>')
+                    with gr.Row():
+                        add_a = gr.Textbox(label="Node A", placeholder="node_a")
+                        add_b = gr.Textbox(label="Node B", placeholder="node_b")
+                        add_w = gr.Number(value=60, label="Weight (s)",
+                                          precision=0)
+                    with gr.Row(elem_classes="equal-row"):
+                        add_btn    = gr.Button("Add Edge", variant="primary")
+                        remove_btn = gr.Button("Remove Edge", variant="secondary")
+                        reset_btn  = gr.Button("Reset Graph", variant="secondary")
+
+        # ============== HANDLERS (unchanged logic) ====================
+        def infer(image, run_yolo, run_resnet,
+                  conf_thresh, class_conf_thresh, device_choice):
             if image is None:
                 return None, {}, "No image provided", ""
-            annotated, dets = run_inference(image, use_yolo=run_yolo, use_resnet=run_resnet, conf_thresh=conf_thresh, device=device_choice)
-            # full-image classification
+            annotated, dets = run_inference(
+                image, use_yolo=run_yolo, use_resnet=run_resnet,
+                conf_thresh=conf_thresh, device=device_choice)
             loc, confv = classify_full_image(image, device=device_choice)
             if loc is None:
-                nav_text = "Classification failed"
+                nav_text  = "Classification failed"
                 pred_text = "**Prediction:** Unknown"
             else:
                 b, f, r = parse_location(loc)
                 pretty = b + (f" · {f}" if f else "") + (f" · {r}" if r else "")
-                pred_text = f"### {pretty}  \n**Class:** {loc} — {confv:.0%}"
+                pred_text = f"### {pretty}  \n**Class:** `{loc}` — {confv:.0%}"
                 if confv >= class_conf_thresh:
-                    nav_text = f"**Predicted location:** {loc} ({pretty}) — {confv:.0%}"
+                    nav_text = (f"**Predicted location:** {loc} "
+                                f"({pretty}) — {confv:.0%}")
                 else:
-                    nav_text = f"Predicted location: {loc} — confidence {confv:.0%} (below threshold {class_conf_thresh:.0%})"
+                    nav_text = (f"Predicted location: {loc} — confidence "
+                                f"{confv:.0%} (below threshold "
+                                f"{class_conf_thresh:.0%})")
             return annotated, dets, nav_text, pred_text
 
-        def navigate_ui(image, destination, conf_thresh, class_conf_thresh, device_choice):
+        def navigate_ui(image, destination,
+                        conf_thresh, class_conf_thresh, device_choice):
             if image is None:
                 return None, "No image provided", {}, ""
-            annotated, nav_text, dets = navigate_from_image(image, destination, conf_thresh=conf_thresh, class_thresh=class_conf_thresh, device=device_choice)
-            # also compute a prediction display
+            annotated, nav_text, dets = navigate_from_image(
+                image, destination, conf_thresh=conf_thresh,
+                class_thresh=class_conf_thresh, device=device_choice)
             loc, confv = classify_full_image(image, device=device_choice)
             if loc:
                 b, f, r = parse_location(loc)
                 pretty = b + (f" · {f}" if f else "") + (f" · {r}" if r else "")
-                pred_text = f"### {pretty}  \n**Class:** {loc} — {confv:.0%}"
+                pred_text = f"### {pretty}  \n**Class:** `{loc}` — {confv:.0%}"
             else:
                 pred_text = ""
             return annotated, nav_text, dets, pred_text
 
-        run_btn.click(infer, inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device], outputs=[out_img, out_json, out_nav, pred_md])
-        # allow running navigation separately
-        nav_btn.click(navigate_ui, inputs=[inp, dest_dd, conf, class_conf, device], outputs=[out_img, out_nav, out_json, pred_md])
-        # auto-run infer when image is uploaded
-        inp.upload(infer, inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device], outputs=[out_img, out_json, out_nav, pred_md])
-        save_graph.click(update_graph_from_text, inputs=[graph_txt], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
-        add_btn.click(add_edge_ui, inputs=[add_a, add_b, add_w], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
-        remove_btn.click(remove_edge_ui, inputs=[add_a, add_b], outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
-        reset_btn.click(reset_graph_ui, inputs=None, outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        run_btn.click(infer,
+            inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device],
+            outputs=[out_img, out_json, out_nav, pred_md])
+        nav_btn.click(navigate_ui,
+            inputs=[inp, dest_dd, conf, class_conf, device],
+            outputs=[out_img, out_nav, out_json, pred_md])
+        inp.upload(infer,
+            inputs=[inp, yolo_cb, resnet_cb, conf, class_conf, device],
+            outputs=[out_img, out_json, out_nav, pred_md])
+        save_graph.click(update_graph_from_text, inputs=[graph_txt],
+            outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        add_btn.click(add_edge_ui, inputs=[add_a, add_b, add_w],
+            outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        remove_btn.click(remove_edge_ui, inputs=[add_a, add_b],
+            outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+        reset_btn.click(reset_graph_ui, inputs=None,
+            outputs=[graph_txt, out_graph_status, dest_dd, graph_preview])
+
+    # Stash for the launcher (Gradio 6 wants these on launch instead of Blocks)
+    demo._light_theme = light_theme
+    demo._custom_css  = custom_css
     return demo
 
 
 if __name__ == "__main__":
     demo = build_ui()
-    demo.launch(server_name="0.0.0.0", share=False)
+    _major = int(getattr(gr, "__version__", "4.0.0").split(".")[0])
+    if _major >= 6:
+        demo.launch(server_name="0.0.0.0", share=False,
+                    theme=demo._light_theme, css=demo._custom_css)
+    else:
+        demo.launch(server_name="0.0.0.0", share=False)
