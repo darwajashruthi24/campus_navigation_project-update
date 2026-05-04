@@ -1,0 +1,7 @@
+gradio>=4.0
+torch
+torchvision
+ultralytics
+Pillow
+numpy
+opencv-python
